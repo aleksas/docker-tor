@@ -1,3 +1,4 @@
+
 # use the ubuntu latest image
 FROM ubuntu:16.04
 
@@ -5,10 +6,10 @@ FROM ubuntu:16.04
 RUN apt-get -qq update && apt-get -qq --yes upgrade
 
 # install sys utils
-RUN apt-get -qq install --yes build-essential libevent-dev libssl-dev curl g++
+RUN apt-get -qq install --yes build-essential libevent-dev libssl-dev curl g++ python
 
 # install tor
-ENV TOR_VERSION 0.2.8.7
+ENV TOR_VERSION 0.2.9.13
 RUN curl -0 -L https://www.torproject.org/dist/tor-${TOR_VERSION}.tar.gz | tar xz -C /tmp
 RUN cd /tmp/tor-${TOR_VERSION} && ./configure
 RUN cd /tmp/tor-${TOR_VERSION} && make -j 4
@@ -26,14 +27,19 @@ ENV HAPROXY_VERSION 1.6.8
 RUN curl -0 -L http://haproxy.1wt.eu/download/1.6/src/haproxy-${HAPROXY_VERSION}.tar.gz | tar xz -C /tmp
 RUN cd /tmp/haproxy-${HAPROXY_VERSION}/ && make TARGET=linux2628 USE_OPENSSL=1 USE_ZLIB=1
 RUN cd /tmp/haproxy-${HAPROXY_VERSION}/ && make install
-ADD ./haproxy.conf /etc/default/haproxy.conf
 
-# prepare tor folders
-RUN mkdir -p /var/db/tor/1 /var/db/tor/2 /var/db/tor/3 /var/db/tor/4 /var/db/tor/5 /var/db/tor/6 /var/db/tor/7 /var/db/tor/8 /var/db/tor/9 /var/db/tor/10
-RUN chmod -R 700 /var/db/tor
-ADD start.sh /
-RUN chmod +x /start.sh
+ENV NODES=10
 
-EXPOSE 9100 9101 2090 53
+ADD entry.sh /
+RUN chmod +x /entry.sh
+RUN sed -i 's/\r$//' entry.sh
 
-CMD ["./start.sh"]
+RUN mkdir -p /usr/local/etc/tor
+# RUN echo 'MaxCircuitDirtiness 10' >> /usr/local/etc/tor/torrc
+RUN echo "ExitNodes {ua},{uk},{lv},{lt},{fi},{se},{no},{pl},{de},{fr},{nl},{be},{cz},{at} StrictNodes 1"  >> /usr/local/etc/tor/torrc
+RUN echo "EntryNodes {ua},{uk},{lv},{lt},{fi},{se},{no},{pl},{de},{fr},{nl},{be},{cz},{at} StrictNodes 1"  >> /usr/local/etc/tor/torrc
+
+
+ADD generate.py /
+
+CMD ["/entry.sh"]

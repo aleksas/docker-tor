@@ -1,6 +1,8 @@
-count = 100
+import os
+nodes = int(os.environ['NODES'])
+
 tor_port_start = 7050
-delegateport_start = 8050
+delegate_port_start = 8050
 
 delegate_version = '9.9.13'
 
@@ -12,6 +14,10 @@ echo "nameserver 127.0.0.1" > /etc/resolv.conf
 resolvconf -u
 ifdown -a
 ifup -a
+
+# prepare tor folders
+mkdir -p %s
+chmod -R 700 /var/db/tor
 
 # launch 10 tors
 %s
@@ -25,9 +31,11 @@ haproxy -f /etc/default/haproxy.conf -q -db'''
 
 tor_command = '/usr/local/bin/tor --SocksPort %d --PidFile /var/run/tor/%d.pid --RunAsDaemon 1 --DataDirectory /var/db/tor/%d'
 delegate_command = '/tmp/delegate%s/src/delegated -P%d SERVER=http SOCKS=localhost:%d PIDFILE=/var/run/delegated/%d.pid OWNER=root/root'
+pid_dir = '/var/db/tor/%d'
 
 tor_commands = []
 delegate_commands = []
+pid_dirs = []
 
 haproxy_conf_body = '''
 global
@@ -73,68 +81,17 @@ backend_socks_command = '  server 127.0.0.1:%d 127.0.0.1:%d check'
 backend_tors = []
 backend_socks = []
 
-Dockerfile_body = '''
-# use the ubuntu latest image
-FROM ubuntu:16.04
-
-# Update and upgrade system
-RUN apt-get -qq update && apt-get -qq --yes upgrade
-
-# install sys utils
-RUN apt-get -qq install --yes build-essential libevent-dev libssl-dev curl g++
-
-RUN mkdir /usr/local/etc/tor
-RUN echo 'MaxCircuitDirtiness 1' >> /usr/local/etc/tor/torrc
-
-# install tor
-ENV TOR_VERSION 0.2.9.13
-RUN curl -0 -L https://www.torproject.org/dist/tor-${TOR_VERSION}.tar.gz | tar xz -C /tmp
-RUN cd /tmp/tor-${TOR_VERSION} && ./configure
-RUN cd /tmp/tor-${TOR_VERSION} && make -j 4
-RUN cd /tmp/tor-${TOR_VERSION} && make install
-
-# install delegate
-ENV DELEGATE_VERSION 9.9.13
-RUN curl ftp://anonymous@ftp.delegate.org/pub/DeleGate/delegate${DELEGATE_VERSION}.tar.gz | tar xz -C /tmp
-RUN echo "ADMIN=root@root.com" > /tmp/delegate${DELEGATE_VERSION}/src/DELEGATE_CONF
-RUN sed -i -e '1i#include <util.h>\\' /tmp/delegate${DELEGATE_VERSION}/maker/_-forkpty.c
-RUN cd /tmp/delegate${DELEGATE_VERSION} && make
-
-# install haproxy
-ENV HAPROXY_VERSION 1.6.8
-RUN curl -0 -L http://haproxy.1wt.eu/download/1.6/src/haproxy-${HAPROXY_VERSION}.tar.gz | tar xz -C /tmp
-RUN cd /tmp/haproxy-${HAPROXY_VERSION}/ && make TARGET=linux2628 USE_OPENSSL=1 USE_ZLIB=1
-RUN cd /tmp/haproxy-${HAPROXY_VERSION}/ && make install
-ADD ./haproxy.conf /etc/default/haproxy.conf
-
-# prepare tor folders
-RUN mkdir -p %s
-RUN chmod -R 700 /var/db/tor
-ADD start.sh /
-RUN chmod +x /start.sh
-
-EXPOSE 9100 9101 2090 53
-
-CMD ["./start.sh"]
-'''
-
-pid_dir = '/var/db/tor/%d'
-pid_dirs = []
-
-for i in range(1, count + 1):
+for i in range(1, nodes + 1):
     tor_commands.append( tor_command % (tor_port_start + i, i, i) )
-    delegate_commands.append( delegate_command % (delegate_version, delegateport_start + i, tor_port_start + i, i) )
+    delegate_commands.append( delegate_command % (delegate_version, delegate_port_start + i, tor_port_start + i, i) )
 
-    backend_tors.append( backend_tor_command % (delegateport_start + i, delegateport_start + i) )
+    backend_tors.append( backend_tor_command % (delegate_port_start + i, delegate_port_start + i) )
     backend_socks.append( backend_socks_command % (tor_port_start + i, tor_port_start + i) )
     pid_dirs.append( pid_dir % i )
 
-with open('start.sh', 'w') as fh:
-  fh.write(start_sh_body % ('\n'.join(tor_commands), '\n'.join(delegate_commands)) )
+with open('/start.sh', 'w') as fh:
+  content = start_sh_body % (' '.join(pid_dirs), '\n'.join(tor_commands), '\n'.join(delegate_commands))
+  fh.write( content.replace('\r', '') )
 
-with open('haproxy.conf', 'w') as fh:
+with open('/etc/default/haproxy.conf', 'w') as fh:
   fh.write(haproxy_conf_body % ('\n'.join(backend_tors), '\n'.join(backend_socks)))    
-
-with open('Dockerfile', 'w') as fh:           
-  fh.write(Dockerfile_body % ' '.join(pid_dirs))
-
